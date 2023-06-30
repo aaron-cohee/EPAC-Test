@@ -1,0 +1,583 @@
+default: 
+  tags:
+    - foundation-runner-rhel8-shell
+
+variables:
+  PAC_OUTPUT_FOLDER: Output
+  PAC_DEFINITIONS_FOLDER: Definitions
+  BHPPlanLandingZoneClientId: BHPPlanLandingZoneClientId
+  BHPPlanLandingZoneClientSecret: BHPPlanLandingZoneClientSecret
+  BHPDevSubscriptionId: BHPDevSubscriptionId
+  BHPDevLandingZoneClientId: BHPDevLandingZoneClientId
+  BHPDevLandingZoneClientSecret: BHPDevLandingZoneClientSecret
+  BHPTestSubscriptionId: BHPTestSubscriptionId
+  BHPTestLandingZoneClientId: BHPTestLandingZoneClientId
+  BHPTestLandingZoneClientSecret: BHPTestLandingZoneClientSecret
+  BHPNpeLandingZoneClientId: BHPNpeLandingZoneClientId
+  BHPNpeLandingZoneClientSecret: BHPNpeLandingZoneClientSecret
+  BHPNpeRolesLandingZoneClientId: BHPNpeRolesLandingZoneClientId
+  BHPNpeRolesLandingZoneClientSecret: BHPNpeRolesLandingZoneClientSecret
+  BHPProdLandingZoneClientId: BHPProdLandingZoneClientId
+  BHPProdLandingZoneClientSecret: BHPProdLandingZoneClientSecret
+  BHPProdRolesLandingZoneClientId: BHPProdRolesLandingZoneClientId
+  BHPProdRolesLandingZoneClientSecret: BHPProdRolesLandingZoneClientSecret
+
+stages:
+  - devStage
+  - testStage
+  - npeStage
+  - prdStage
+  - devExemptionStage
+  - exemptionStage
+  - devOperationStage
+  - testOperationStage
+  - operationStage
+  - npeOperationStage
+  - prdOperationStage
+
+preTest:
+  stage: devStage
+  variables:
+    pacEnvironmentSelector: epac-dev
+  rules:
+    - if: '$CI_COMMIT_BRANCH != "main" && $CI_COMMIT_BRANCH !~ /ex[^-]*\-/ && $CI_COMMIT_BRANCH !~ /\W*(operations-)\W*/ && $CI_COMMIT_BRANCH !~ /\W*(operation-)\W*/ && $CI_PIPELINE_SOURCE == "web"'
+      when: always
+  script:
+    - pwsh -File "./DeploymentScripts/Verify-PolicyScopes.ps1" -PacEnvironmentSelector $pacEnvironmentSelector -InformationAction Continue
+  environment:
+    name: Dev
+  
+devPlan:
+  stage: devStage
+  variables:
+    pacEnvironmentSelector: epac-dev
+  needs: 
+    - job: preTest
+  rules:
+    - if: '$CI_COMMIT_BRANCH != "main" && $CI_COMMIT_BRANCH !~ /ex[^-]*\-/ && $CI_COMMIT_BRANCH !~ /\W*(operations-)\W*/ && $CI_COMMIT_BRANCH !~ /\W*(operation-)\W*/ && $CI_PIPELINE_SOURCE == "web"'
+      when: on_success
+  script:
+    - source ./DeploymentScripts/dev_fetch_secrets.sh
+    - pwsh -File "./DeploymentScripts/az-connect.ps1" -TenantId $tenant_id -SubscriptionId $AzCred_DevSubscription -AzCred_UserName $AzCred_DevUserName -AzCred_Password $AzCred_DevPassword
+    - pwsh -File "./Scripts/Deploy/Build-DeploymentPlans.ps1" -PacEnvironmentSelector $pacEnvironmentSelector -InformationAction Continue
+  artifacts: 
+    name: "plans-$pacEnvironmentSelector"
+    paths: 
+      - "$PAC_OUTPUT_FOLDER/plans-$pacEnvironmentSelector"
+  environment:
+    name: Dev
+  
+Deploy DEV Policy:
+  stage: devStage
+  variables:
+    pacEnvironmentSelector: epac-dev
+  needs: 
+    - job: devPlan
+      artifacts: true
+  rules:
+    - if: '$CI_COMMIT_BRANCH != "main" && $CI_COMMIT_BRANCH !~ /ex[^-]*\-/ && $CI_COMMIT_BRANCH !~ /\W*(operations-)\W*/ && $CI_COMMIT_BRANCH !~ /\W*(operation-)\W*/ && $CI_PIPELINE_SOURCE == "web"'
+      when: on_success
+  script:
+    - source ./DeploymentScripts/dev_fetch_secrets.sh
+    - pwsh -File "./DeploymentScripts/az-connect.ps1" -TenantId $tenant_id -SubscriptionId $AzCred_DevSubscription -AzCred_UserName $AzCred_DevUserName -AzCred_Password $AzCred_DevPassword
+    - pwsh -File "./Scripts/Deploy/Deploy-PolicyPlan.ps1" -PacEnvironmentSelector $pacEnvironmentSelector -InformationAction Continue
+  environment:
+    name: Dev
+
+Deploy DEV Role Assignments:
+  stage: devStage
+  variables:
+    pacEnvironmentSelector: epac-dev
+  needs: 
+    - job: Deploy DEV Policy
+    - job: devPlan
+      artifacts: true
+  rules:
+    - if: '$CI_COMMIT_BRANCH != "main" && $CI_COMMIT_BRANCH !~ /ex[^-]*\-/ && $CI_COMMIT_BRANCH !~ /\W*(operations-)\W*/ && $CI_COMMIT_BRANCH !~ /\W*(operation-)\W*/ && $CI_PIPELINE_SOURCE == "web"'
+      when: on_success
+  script:
+    - source ./DeploymentScripts/dev_fetch_secrets.sh
+    - pwsh -File "./DeploymentScripts/az-connect.ps1" -TenantId $tenant_id -SubscriptionId $AzCred_DevSubscription -AzCred_UserName $AzCred_DevUserName -AzCred_Password $AzCred_DevPassword
+    - pwsh -File "./Scripts/Deploy/Deploy-RolesPlan.ps1" -PacEnvironmentSelector $pacEnvironmentSelector -InformationAction Continue
+  environment:
+    name: Dev
+
+Get DEV Plan for Environment:
+  stage: devStage
+  variables:
+    pacEnvironmentSelectors: epac-dev
+    environment: dev
+  needs: 
+    - job: devPlan
+      artifacts: true
+  rules:
+    - if: '$CI_COMMIT_BRANCH != "main" && $CI_COMMIT_BRANCH !~ /ex[^-]*\-/ && $CI_COMMIT_BRANCH !~ /\W*(operations-)\W*/ && $CI_COMMIT_BRANCH !~ /\W*(operation-)\W*/ && $CI_PIPELINE_SOURCE == "web"'
+      when: on_success
+  script:
+    - pwsh -File "./DeploymentScripts/Get-EnvironmentChanges.ps1" -PacEnvironmentSelectors $pacEnvironmentSelectors -InformationAction Continue
+  artifacts: 
+    name: "$environment-plan"
+    paths: 
+      - "$PAC_OUTPUT_FOLDER/$environment-plan/$environment-plan.json"
+  environment:
+    name: Dev
+
+testPlan:
+  stage: testStage
+  variables:
+    pacEnvironmentSelector: epac-test
+  rules:
+    - if: '$CI_COMMIT_BRANCH != "main" && $CI_COMMIT_BRANCH !~ /ex[^-]*\-/ && $CI_COMMIT_BRANCH !~ /\W*(operations-)\W*/ && $CI_COMMIT_BRANCH !~ /\W*(operation-)\W*/ && $CI_PIPELINE_SOURCE == "web"'
+      when: manual
+  script:
+    - source ./DeploymentScripts/test_fetch_secrets.sh
+    - pwsh -File "./DeploymentScripts/az-connect.ps1" -TenantId $tenant_id -SubscriptionId $AzCred_TestSubscription -AzCred_UserName $AzCred_TestUserName -AzCred_Password $AzCred_TestPassword
+    - pwsh -File "./Scripts/Deploy/Build-DeploymentPlans.ps1" -PacEnvironmentSelector $pacEnvironmentSelector -InformationAction Continue
+  artifacts: 
+    name: "plans-$pacEnvironmentSelector"
+    paths: 
+      - "$PAC_OUTPUT_FOLDER/plans-$pacEnvironmentSelector"
+  environment:
+    name: Test
+
+Deploy TEST Policy:
+  stage: testStage
+  variables:
+    pacEnvironmentSelector: epac-test
+  needs: 
+    - job: testPlan
+      artifacts: true
+  rules:
+    - if: '$CI_COMMIT_BRANCH != "main" && $CI_COMMIT_BRANCH !~ /ex[^-]*\-/ && $CI_COMMIT_BRANCH !~ /\W*(operations-)\W*/ && $CI_COMMIT_BRANCH !~ /\W*(operation-)\W*/ && $CI_PIPELINE_SOURCE == "web"'
+      when: on_success
+  script:
+    - source ./DeploymentScripts/test_fetch_secrets.sh
+    - pwsh -File "./DeploymentScripts/az-connect.ps1" -TenantId $tenant_id -SubscriptionId $AzCred_TestSubscription -AzCred_UserName $AzCred_TestUserName -AzCred_Password $AzCred_TestPassword
+    - pwsh -File "./Scripts/Deploy/Deploy-PolicyPlan.ps1" -PacEnvironmentSelector $pacEnvironmentSelector -InformationAction Continue
+
+Deploy TEST Role Assignments:
+  stage: testStage
+  variables:
+    pacEnvironmentSelector: epac-test
+  needs: 
+    - job: Deploy TEST Policy
+    - job: testPlan
+      artifacts: true
+  rules:
+    - if: '$CI_COMMIT_BRANCH != "main" && $CI_COMMIT_BRANCH !~ /ex[^-]*\-/ && $CI_COMMIT_BRANCH !~ /\W*(operations-)\W*/ && $CI_COMMIT_BRANCH !~ /\W*(operation-)\W*/ && $CI_PIPELINE_SOURCE == "web"'
+      when: on_success
+  script:
+    - source ./DeploymentScripts/test_fetch_secrets.sh
+    - pwsh -File "./DeploymentScripts/az-connect.ps1" -TenantId $tenant_id -SubscriptionId $AzCred_TestSubscription -AzCred_UserName $AzCred_TestUserName -AzCred_Password $AzCred_TestPassword
+    - pwsh -File "./Scripts/Deploy/Deploy-RolesPlan.ps1" -PacEnvironmentSelector $pacEnvironmentSelector -InformationAction Continue
+
+Get Test Plan for Environment:
+  stage: testStage
+  variables:
+    pacEnvironmentSelectors: epac-test
+    environment: test
+  needs: 
+    - job: testPlan
+      artifacts: true
+  rules:
+    - if: '$CI_COMMIT_BRANCH != "main" && $CI_COMMIT_BRANCH !~ /ex[^-]*\-/ && $CI_COMMIT_BRANCH !~ /\W*(operations-)\W*/ && $CI_COMMIT_BRANCH !~ /\W*(operation-)\W*/ && $CI_PIPELINE_SOURCE == "web"'
+      when: on_success
+  script:
+    - pwsh -File "./DeploymentScripts/Get-EnvironmentChanges.ps1" -PacEnvironmentSelectors $pacEnvironmentSelectors -InformationAction Continue
+  artifacts: 
+    name: "$environment-plan"
+    paths: 
+      - "$PAC_OUTPUT_FOLDER/$environment-plan/$environment-plan.json"
+
+npePlan:
+  stage: npeStage
+  variables:
+    pacEnvironmentSelector: npe-mg
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_TITLE !~ /ex[^-]*\-/ && $CI_COMMIT_TITLE !~ /\W*(operations-)\W*/ && $CI_COMMIT_TITLE !~ /\W*(operation-)\W*/) && $CI_COMMIT_BRANCH == "main"'
+      when: always
+  script:
+    - source ./DeploymentScripts/plan_fetch_secrets.sh
+    - pwsh -File "./DeploymentScripts/az-connect.ps1" -TenantId $tenant_id -AzCred_UserName $AzCred_PlanUserName -AzCred_Password $AzCred_PlanPassword
+    - pwsh -File "./Scripts/Deploy/Build-DeploymentPlans.ps1" -PacEnvironmentSelector pit-mg -InformationAction Continue
+    - pwsh -File "./Scripts/Deploy/Build-DeploymentPlans.ps1" -PacEnvironmentSelector pov-mg -InformationAction Continue
+    - pwsh -File "./Scripts/Deploy/Build-DeploymentPlans.ps1" -PacEnvironmentSelector npe-mg -InformationAction Continue
+  artifacts: 
+    name: "plans-npe-mg"
+    paths: 
+      - "$PAC_OUTPUT_FOLDER/plans-pit-mg"
+      - "$PAC_OUTPUT_FOLDER/plans-pov-mg"
+      - "$PAC_OUTPUT_FOLDER/plans-npe-mg"
+  environment:
+    name: Npe
+
+Deploy NPE Policy:
+  stage: npeStage
+  needs: 
+    - job: npePlan
+      artifacts: true
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_TITLE !~ /ex[^-]*\-/ && $CI_COMMIT_TITLE !~ /\W*(operations-)\W*/ && $CI_COMMIT_TITLE !~ /\W*(operation-)\W*/) && $CI_COMMIT_BRANCH == "main"'
+      when: manual
+  script:
+    - source ./DeploymentScripts/npe_fetch_secrets.sh
+    - pwsh -File "./DeploymentScripts/az-connect.ps1" -TenantId $tenant_id -AzCred_UserName $AzCred_NpeUserName -AzCred_Password $AzCred_NpePassword
+    - pwsh -File "./Scripts/Deploy/Deploy-PolicyPlan.ps1" -PacEnvironmentSelector pit-mg -InformationAction Continue
+    - pwsh -File "./Scripts/Deploy/Deploy-PolicyPlan.ps1" -PacEnvironmentSelector pov-mg -InformationAction Continue
+    - pwsh -File "./Scripts/Deploy/Deploy-PolicyPlan.ps1" -PacEnvironmentSelector npe-mg -InformationAction Continue
+  environment:
+    name: Npe
+
+Deploy NPE Role Assignments:
+  stage: npeStage
+  needs: 
+    - job: Deploy NPE Policy
+    - job: npePlan
+      artifacts: true
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_TITLE !~ /ex[^-]*\-/ && $CI_COMMIT_TITLE !~ /\W*(operations-)\W*/ && $CI_COMMIT_TITLE !~ /\W*(operation-)\W*/) && $CI_COMMIT_BRANCH == "main"'
+      when: manual
+  script:
+    - source ./DeploymentScripts/npe_roles_fetch_secrets.sh
+    - pwsh -File "./DeploymentScripts/az-connect.ps1" -TenantId $tenant_id -AzCred_UserName $AzCred_NpeRolesUserName -AzCred_Password $AzCred_NpeRolesPassword
+    - pwsh -File "./Scripts/Deploy/Deploy-RolesPlan.ps1" -PacEnvironmentSelector pit-mg -InformationAction Continue
+    - pwsh -File "./Scripts/Deploy/Deploy-RolesPlan.ps1" -PacEnvironmentSelector pov-mg -InformationAction Continue
+    - pwsh -File "./Scripts/Deploy/Deploy-RolesPlan.ps1" -PacEnvironmentSelector npe-mg -InformationAction Continue
+  environment:
+    name: Npe
+
+Get NPE Plan for Environment:
+  stage: npeStage
+  variables:
+    pacEnvironmentSelectors: pit-mg,pov-mg,npe-mg
+    environment: npe
+  needs: 
+    - job: npePlan
+      artifacts: true
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_TITLE !~ /ex[^-]*\-/ && $CI_COMMIT_TITLE !~ /\W*(operations-)\W*/ && $CI_COMMIT_TITLE !~ /\W*(operation-)\W*/) && $CI_COMMIT_BRANCH == "main"'
+      when: on_success
+  script:
+    - pwsh -File "./DeploymentScripts/Get-EnvironmentChanges.ps1" -PacEnvironmentSelectors $pacEnvironmentSelectors -InformationAction Continue
+  artifacts: 
+    name: "$environment-plan"
+    paths: 
+      - "$PAC_OUTPUT_FOLDER/$environment-plan/$environment-plan.json"
+  environment:
+    name: Npe
+  
+prdPlan:
+  stage: prdStage
+  variables:
+    pacEnvironmentSelector: prd-mg
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_TITLE !~ /ex[^-]*\-/ && $CI_COMMIT_TITLE !~ /\W*(operations-)\W*/ && $CI_COMMIT_TITLE !~ /\W*(operation-)\W*/) && $CI_COMMIT_BRANCH == "main"'
+      when: manual
+  script:
+    - source ./DeploymentScripts/plan_fetch_secrets.sh
+    - pwsh -File "./DeploymentScripts/az-connect.ps1" -TenantId $tenant_id -AzCred_UserName $AzCred_PlanUserName -AzCred_Password $AzCred_PlanPassword
+    - pwsh -File "./Scripts/Deploy/Build-DeploymentPlans.ps1" -PacEnvironmentSelector cor-mg -InformationAction Continue
+    - pwsh -File "./Scripts/Deploy/Build-DeploymentPlans.ps1" -PacEnvironmentSelector prd-mg -InformationAction Continue
+  artifacts: 
+    name: "plans-prd-mg"
+    paths: 
+      - "$PAC_OUTPUT_FOLDER/plans-cor-mg"
+      - "$PAC_OUTPUT_FOLDER/plans-prd-mg"
+  environment:
+    name: Prod
+
+Deploy PRD Policy:
+  stage: prdStage
+  needs: 
+    - job: prdPlan
+      artifacts: true
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_TITLE !~ /ex[^-]*\-/ && $CI_COMMIT_TITLE !~ /\W*(operations-)\W*/ && $CI_COMMIT_TITLE !~ /\W*(operation-)\W*/) && $CI_COMMIT_BRANCH == "main"'
+      when: manual
+  script:
+    - source ./DeploymentScripts/prd_fetch_secrets.sh
+    - pwsh -File "./DeploymentScripts/az-connect.ps1" -TenantId $tenant_id -AzCred_UserName $AzCred_ProdUserName -AzCred_Password $AzCred_ProdPassword
+    - pwsh -File "./Scripts/Deploy/Deploy-PolicyPlan.ps1" -PacEnvironmentSelector cor-mg -InformationAction Continue
+    - pwsh -File "./Scripts/Deploy/Deploy-PolicyPlan.ps1" -PacEnvironmentSelector prd-mg -InformationAction Continue
+
+Deploy PRD Role Assignments:
+  stage: prdStage
+  needs: 
+    - job: Deploy PRD Policy
+    - job: prdPlan
+      artifacts: true
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_TITLE !~ /ex[^-]*\-/ && $CI_COMMIT_TITLE !~ /\W*(operations-)\W*/ && $CI_COMMIT_TITLE !~ /\W*(operation-)\W*/) && $CI_COMMIT_BRANCH == "main"'
+      when: manual
+  script:
+    - source ./DeploymentScripts/prd_roles_fetch_secrets.sh
+    - pwsh -File "./DeploymentScripts/az-connect.ps1" -TenantId $tenant_id -AzCred_UserName $AzCred_ProdRolesUserName -AzCred_Password $AzCred_ProdRolesPassword
+    - pwsh -File "./Scripts/Deploy/Deploy-RolesPlan.ps1" -PacEnvironmentSelector cor-mg -InformationAction Continue
+    - pwsh -File "./Scripts/Deploy/Deploy-RolesPlan.ps1" -PacEnvironmentSelector prd-mg -InformationAction Continue
+
+Get PRD Plan for Environment:
+  stage: prdStage
+  variables:
+    pacEnvironmentSelectors: cor-mg,prd-mg
+    environment: prd
+  needs: 
+    - job: prdPlan
+      artifacts: true
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_TITLE !~ /ex[^-]*\-/ && $CI_COMMIT_TITLE !~ /\W*(operations-)\W*/ && $CI_COMMIT_TITLE !~ /\W*(operation-)\W*/) && $CI_COMMIT_BRANCH == "main"'
+      when: on_success
+  script:
+    - pwsh -File "./DeploymentScripts/Get-EnvironmentChanges.ps1" -PacEnvironmentSelectors $pacEnvironmentSelectors -InformationAction Continue
+  artifacts: 
+    name: "$environment-plan"
+    paths: 
+      - "$PAC_OUTPUT_FOLDER/$environment-plan/$environment-plan.json"
+
+Validate Dev Exemption Changes:
+  stage: devExemptionStage
+  rules:
+    - if: '$CI_COMMIT_BRANCH =~ /ex[^-]*\-/ && $CI_PIPELINE_SOURCE == "web"'
+      when: always
+  script:
+    - pwsh -File "./DeploymentScripts/Check-ExemptionFilesChanged.ps1"
+
+Set Dev Exemption Scope:
+  stage: devExemptionStage
+  needs: 
+    - job: Validate Dev Exemption Changes
+  rules:
+    - if: '$CI_COMMIT_BRANCH =~ /ex[^-]*\-/ && $CI_PIPELINE_SOURCE == "web"'
+      when: on_success
+  script:
+    - pwsh -File "./DeploymentScripts/Set-ExemptionScope.ps1"
+  artifacts: 
+    name: "exemption-scopes"
+    paths: 
+      - "$PAC_OUTPUT_FOLDER/exemptions/exemption-scopes.json"
+
+exemptionDevPlan:
+  stage: devExemptionStage
+  needs: 
+    - job: Set Dev Exemption Scope
+      artifacts: true
+  rules:
+    - if: '$CI_COMMIT_BRANCH =~ /ex[^-]*\-/ && $CI_PIPELINE_SOURCE == "web"'
+      when: on_success
+  script:
+    - source ./DeploymentScripts/plan_fetch_secrets.sh
+    - pwsh -File "./DeploymentScripts/az-connect.ps1" -TenantId $tenant_id -AzCred_UserName $AzCred_PlanUserName -AzCred_Password $AzCred_PlanPassword
+    - pwsh -File "./DeploymentScripts/Build-ExemptionPlan.ps1" -InformationAction Continue
+  artifacts: 
+    name: "exemptions-plans-mg"
+    paths: 
+      - "$PAC_OUTPUT_FOLDER/exemptions/epac-dev-exemptions-plan.json"
+      - "$PAC_OUTPUT_FOLDER/exemptions/epac-test-exemptions-plan.json"
+
+Deploy DEV Exemption:
+  stage: devExemptionStage
+  needs: 
+    - job: Set Dev Exemption Scope
+      artifacts: true
+    - job: exemptionDevPlan
+      artifacts: true
+  rules:
+    - if: '$CI_COMMIT_BRANCH =~ /ex[^-]*\-/ && $CI_PIPELINE_SOURCE == "web"'
+      when: on_success
+  script:
+    - source ./DeploymentScripts/dev_fetch_secrets.sh
+    - source ./DeploymentScripts/test_fetch_secrets.sh
+    - pwsh -File "./DeploymentScripts/Deploy-ExemptionPlan.ps1" -InformationAction Continue
+
+Get DEV Exemption Plan for Environment:
+  stage: devExemptionStage
+  variables:
+    pacEnvironmentSelectors: epac-dev,epac-test
+    environment: dev-all
+  needs: 
+    - job: exemptionDevPlan
+      artifacts: true
+  rules:
+    - if: '$CI_COMMIT_BRANCH =~ /ex[^-]*\-/ && $CI_PIPELINE_SOURCE == "web"'
+      when: on_success
+  script:
+    - pwsh -File "./DeploymentScripts/Get-ExemptionEnvironmentChanges.ps1" -PacEnvironmentSelectors $pacEnvironmentSelectors -InformationAction Continue
+  artifacts: 
+    name: "$environment-exemptions-plan"
+    paths: 
+      - "$PAC_OUTPUT_FOLDER/$environment-exemptions-plan/$environment-exemptions-plan.json"
+
+Validate Exemption Changes:
+  stage: exemptionStage
+  rules:
+    - if: '$CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main" && $CI_COMMIT_TITLE =~ /ex[^-]*\-/ && $CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: always
+  script:
+    - pwsh -File "./DeploymentScripts/Check-ExemptionFilesChanged.ps1"
+
+Set Exemption Scope:
+  stage: exemptionStage
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" && $CI_COMMIT_TITLE =~ /ex[^-]*\-/ && $CI_PIPELINE_SOURCE == "push"'
+      when: always
+  script:
+    - pwsh -File "./DeploymentScripts/Set-ExemptionScope.ps1"
+  artifacts: 
+    name: "exemption-scopes"
+    paths: 
+      - "$PAC_OUTPUT_FOLDER/exemptions/exemption-scopes.json"
+
+exemptionPlan:
+  stage: exemptionStage
+  needs: 
+    - job: Set Exemption Scope
+      artifacts: true
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" && $CI_COMMIT_TITLE =~ /ex[^-]*\-/ && $CI_PIPELINE_SOURCE == "push"'
+      when: on_success
+  script:
+    - source ./DeploymentScripts/plan_fetch_secrets.sh
+    - pwsh -File "./DeploymentScripts/az-connect.ps1" -TenantId $tenant_id -AzCred_UserName $AzCred_PlanUserName -AzCred_Password $AzCred_PlanPassword
+    - pwsh -File "./DeploymentScripts/Build-ExemptionPlan.ps1" -InformationAction Continue
+  artifacts: 
+    name: "exemptions-plans-mg"
+    paths: 
+      - "$PAC_OUTPUT_FOLDER/exemptions/pit-mg-exemptions-plan.json"
+      - "$PAC_OUTPUT_FOLDER/exemptions/pov-mg-exemptions-plan.json"
+      - "$PAC_OUTPUT_FOLDER/exemptions/npe-mg-exemptions-plan.json"
+      - "$PAC_OUTPUT_FOLDER/exemptions/cor-mg-exemptions-plan.json"
+      - "$PAC_OUTPUT_FOLDER/exemptions/prd-mg-exemptions-plan.json"
+
+Deploy Exemptions:
+  stage: exemptionStage
+  needs: 
+    - job: Set Exemption Scope
+      artifacts: true
+    - job: exemptionPlan
+      artifacts: true
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" && $CI_COMMIT_TITLE =~ /ex[^-]*\-/ && $CI_PIPELINE_SOURCE == "push"'
+      when: manual
+  script:
+    - source ./DeploymentScripts/npe_fetch_secrets.sh
+    - source ./DeploymentScripts/prd_fetch_secrets.sh
+    - pwsh -File "./DeploymentScripts/Deploy-ExemptionPlan.ps1" -InformationAction Continue
+
+Get Exemption Plan:
+  stage: exemptionStage
+  variables:
+    pacEnvironmentSelectors: pit-mg,pov-mg,npe-mg,cor-mg,prd-mg
+    environment: all
+  needs: 
+    - job: exemptionPlan
+      artifacts: true
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" && $CI_COMMIT_TITLE =~ /ex[^-]*\-/ && $CI_PIPELINE_SOURCE == "push"'
+      when: on_success
+  script:
+    - pwsh -File "./DeploymentScripts/Get-ExemptionEnvironmentChanges.ps1" -PacEnvironmentSelectors $pacEnvironmentSelectors -InformationAction Continue
+  artifacts: 
+    name: "$environment-exemptions-plan"
+    paths: 
+      - "$PAC_OUTPUT_FOLDER/$environment-exemptions-plan/$environment-exemptions-plan.json"
+
+Validate Dev Operation Changes:
+  stage: devOperationStage
+  variables:
+    pacEnvironmentSelector: epac-dev
+  rules:
+    - if: '($CI_COMMIT_BRANCH =~ /\W*(operations-)\W*/ || $CI_COMMIT_BRANCH =~ /\W*(operation-)\W*/) && $CI_PIPELINE_SOURCE == "web"'
+      when: always
+  script:
+    - pwsh -File "./DeploymentScripts/Check-OperationFilesChanged.ps1"
+
+operationDevPlan:
+  stage: devOperationStage
+  variables:
+    pacEnvironmentSelector: epac-dev
+  needs: 
+    - job: Validate Dev Operation Changes
+  rules:
+    - if: '($CI_COMMIT_BRANCH =~ /\W*(operations-)\W*/ || $CI_COMMIT_BRANCH =~ /\W*(operation-)\W*/) && $CI_PIPELINE_SOURCE == "web"'
+      when: on_success
+  script:
+    - source ./DeploymentScripts/dev_fetch_secrets.sh
+    - pwsh -File "./DeploymentScripts/az-connect.ps1" -TenantId $tenant_id -SubscriptionId $AzCred_DevSubscription -AzCred_UserName $AzCred_DevUserName -AzCred_Password $AzCred_DevPassword
+    - pwsh -File "./Scripts/Deploy/Build-DeploymentPlans.ps1" -PacEnvironmentSelector $pacEnvironmentSelector -InformationAction Continue
+  artifacts: 
+    name: "plans-$pacEnvironmentSelector"
+    paths: 
+      - "$PAC_OUTPUT_FOLDER/plans-$pacEnvironmentSelector"
+
+Validate Test Operation Changes:
+  stage: testOperationStage
+  variables:
+    pacEnvironmentSelector: epac-test
+  rules:
+    - if: '($CI_COMMIT_BRANCH =~ /\W*(operations-)\W*/ || $CI_COMMIT_BRANCH =~ /\W*(operation-)\W*/) && $CI_PIPELINE_SOURCE == "web"'
+      when: always
+  script:
+    - pwsh -File "./DeploymentScripts/Check-OperationFilesChanged.ps1"
+
+operationTestPlan:
+  stage: testOperationStage
+  variables:
+    pacEnvironmentSelector: epac-test
+  needs: 
+    - job: Validate Test Operation Changes
+  rules:
+    - if: '($CI_COMMIT_BRANCH =~ /\W*(operations-)\W*/ || $CI_COMMIT_BRANCH =~ /\W*(operation-)\W*/) && $CI_PIPELINE_SOURCE == "web"'
+      when: on_success
+  script:
+    - source ./DeploymentScripts/test_fetch_secrets.sh
+    - pwsh -File "./DeploymentScripts/az-connect.ps1" -TenantId $tenant_id -SubscriptionId $AzCred_TestSubscription -AzCred_UserName $AzCred_TestUserName -AzCred_Password $AzCred_TestPassword
+    - pwsh -File "./Scripts/Deploy/Build-DeploymentPlans.ps1" -PacEnvironmentSelector $pacEnvironmentSelector -InformationAction Continue
+  artifacts: 
+    name: "plans-$pacEnvironmentSelector"
+    paths: 
+      - "$PAC_OUTPUT_FOLDER/plans-$pacEnvironmentSelector"
+
+Validate Operation Changes:
+  stage: operationStage
+  rules:
+    - if: '$CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main" && ($CI_COMMIT_TITLE =~ /\W*(operations-)\W*/ || $CI_COMMIT_TITLE =~ /\W*(operation-)\W*/) && $CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: always
+  script:
+    - pwsh -File "./DeploymentScripts/Check-OperationFilesChanged.ps1"
+
+operationNPEPlan:
+  stage: npeOperationStage
+  variables:
+    pacEnvironmentSelector: npe-mg
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" && ($CI_COMMIT_TITLE =~ /\W*(operations-)\W*/ || $CI_COMMIT_TITLE =~ /\W*(operation-)\W*/) && $CI_PIPELINE_SOURCE == "push"'
+      when: always
+  script:
+    - source ./DeploymentScripts/plan_fetch_secrets.sh
+    - pwsh -File "./DeploymentScripts/az-connect.ps1" -TenantId $tenant_id -AzCred_UserName $AzCred_PlanUserName -AzCred_Password $AzCred_PlanPassword
+    - pwsh -File "./Scripts/Deploy/Build-DeploymentPlans.ps1" -PacEnvironmentSelector pit-mg -InformationAction Continue
+    - pwsh -File "./Scripts/Deploy/Build-DeploymentPlans.ps1" -PacEnvironmentSelector pov-mg -InformationAction Continue
+    - pwsh -File "./Scripts/Deploy/Build-DeploymentPlans.ps1" -PacEnvironmentSelector npe-mg -InformationAction Continue
+  artifacts: 
+    name: "plans-npe-mg"
+    paths: 
+      - "$PAC_OUTPUT_FOLDER/plans-pit-mg"
+      - "$PAC_OUTPUT_FOLDER/plans-pov-mg"
+      - "$PAC_OUTPUT_FOLDER/plans-npe-mg"
+
+operationPRDPlan:
+  stage: prdOperationStage
+  variables:
+    pacEnvironmentSelector: prd-mg
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" && ($CI_COMMIT_TITLE =~ /\W*(operations-)\W*/ || $CI_COMMIT_TITLE =~ /\W*(operation-)\W*/) && $CI_PIPELINE_SOURCE == "push"'
+      when: always
+  script:
+    - source ./DeploymentScripts/plan_fetch_secrets.sh
+    - pwsh -File "./DeploymentScripts/az-connect.ps1" -TenantId $tenant_id -AzCred_UserName $AzCred_PlanUserName -AzCred_Password $AzCred_PlanPassword
+    - pwsh -File "./Scripts/Deploy/Build-DeploymentPlans.ps1" -PacEnvironmentSelector cor-mg -InformationAction Continue
+    - pwsh -File "./Scripts/Deploy/Build-DeploymentPlans.ps1" -PacEnvironmentSelector prd-mg -InformationAction Continue
+  artifacts: 
+    name: "plans-prd-mg"
+    paths: 
+      - "$PAC_OUTPUT_FOLDER/plans-cor-mg"
+      - "$PAC_OUTPUT_FOLDER/plans-prd-mg"
